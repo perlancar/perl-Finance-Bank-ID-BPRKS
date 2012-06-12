@@ -1,22 +1,25 @@
-package Finance::Bank::ID::BCA;
+package Finance::Bank::ID::BPRKS;
 
 use 5.010;
 use Moo;
 use DateTime;
 use Log::Any '$log';
 
+use Parse::Number::ID qw(parse_number_id);
+
 # VERSION
 
 extends 'Finance::Bank::ID::Base';
 
-has _variant => (is => 'rw'); # bisnis or perorangan
-has skip_NEXT => (is => 'rw');
+has _variant => (is => 'rw'); # 'individual' only, for now
+###bca
+###has skip_NEXT => (is => 'rw');
 
 sub BUILD {
     my ($self, $args) = @_;
 
-    $self->site("https://ibank.klikbca.com") unless $self->site;
-    $self->https_host("ibank.klikbca.com")   unless $self->https_host;
+    $self->site("https://ib.bprks.co.id") unless $self->site;
+    $self->https_host("ib.bprks.co.id")   unless $self->https_host;
 }
 
 sub _req {
@@ -24,15 +27,58 @@ sub _req {
 
     # 2012-03-12 - KlikBCA server since a few week ago rejects TE request
     # header, so we do not send them.
-    local @LWP::Protocol::http::EXTRA_SOCK_OPTS =
-        @LWP::Protocol::http::EXTRA_SOCK_OPTS;
-    push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0);
+    ###bca
+    ###local @LWP::Protocol::http::EXTRA_SOCK_OPTS =
+    ###    @LWP::Protocol::http::EXTRA_SOCK_OPTS;
+    ###push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0);
     #$log->tracef("EXTRA_SOCK_OPTS=%s", \@LWP::Protocol::http::EXTRA_SOCK_OPTS);
 
     $self->SUPER::_req(@args);
 }
 
+# XXX tmp, should be in an indo date utility module
+sub _parse_mon {
+    my $self = shift;
+    local $_ = lc(shift);
+    if (/^(?:jan|januar[iy])$/) {
+        return 1;
+    } elsif (/^(?:[fp]eb|[fp]ebruar[iy])$/) {
+        return 2;
+    } elsif (/^(?:mar|mrt|maret|march)$/) {
+        return 3;
+    } elsif (/^(?:apr|april)$/) {
+        return 4;
+    } elsif (/^(?:mei|may)$/) {
+        return 5;
+    } elsif (/^(?:jun|jun[eiy])$/) {
+        return 6;
+    } elsif (/^(?:jul|jul[iy])$/) {
+        return 7;
+    } elsif (/^(?:agu|aug|ags?t|august|agustus)$/) {
+        return 8;
+    } elsif (/^(?:sep|september)$/) {
+        return 9;
+    } elsif (/^(?:o[kc]t|o[ct]ober)$/) {
+        return 10;
+    } elsif (/^(?:no[pv]|no[pv]ember)$/) {
+        return 11;
+    } elsif (/^(?:de[sc]|de[sc]ember)$/) {
+        return 12;
+    } else {
+        die "Can't parse month: $_";
+        #return 0;
+    }
+}
+
+sub _parse_num {
+    my ($self, $s) = @_;
+    my $neg = $s =~ s/^\((.+)\)$/$1/;
+    my $n = parse_number_id(text => $s);
+    $neg ? -$n : $n;
+}
+
 sub login {
+    die "Not yet implemented";
     my ($self) = @_;
     my $s = $self->site;
 
@@ -62,6 +108,7 @@ sub login {
 }
 
 sub logout {
+    die "Not yet implemented";
     my ($self) = @_;
 
     return 1 unless $self->logged_in;
@@ -76,10 +123,11 @@ sub _menu {
     $self->_req(get => ["$s/nav_bar_indo/account_information_menu.htm"]);
 }
 
-sub list_accounts {
+sub list_cards {
+    die "Not yet implemented";
     my ($self) = @_;
     $self->login;
-    $self->logger->info("Listing accounts");
+    $self->logger->info("Listing ATM cards");
     map { $_->{account} } $self->_check_balances;
 }
 
@@ -119,6 +167,7 @@ sub _check_balances {
 }
 
 sub check_balance {
+    die "Not yet implemented";
     my ($self, $account) = @_;
     my @bals = $self->_check_balances;
     return unless @bals;
@@ -130,6 +179,7 @@ sub check_balance {
 }
 
 sub get_statement {
+    die "Not yet implemented";
     my ($self, %args) = @_;
     my $s = $self->site;
     my $max_days = 31;
@@ -242,51 +292,52 @@ sub get_statement {
 
 sub _ps_detect {
     my ($self, $page) = @_;
-    unless ($page =~ /(?:^\s*|&nbsp;)(?:INFORMASI REKENING - MUTASI REKENING|ACCOUNT INFORMATION - ACCOUNT STATEMENT)/mi) {
-        return "No KlikBCA statement page signature found";
+    unless ($page =~ />Detail Informasi Mutasi Rekening</) {
+        return "No BPR KS statement page signature found";
     }
-    $self->_variant($page =~ /^(?:Kode Mata Uang|Currency)/m ? 'bisnis' : 'perorangan');
+    $self->_variant('individual');
     "";
 }
 
 sub _ps_get_metadata {
     my ($self, $page, $stmt) = @_;
 
-    unless ($page =~ /\s*(?:(?:Nomor|No\.) [Rr]ekening|Account Number)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*([\d-]+)/m) {
+    unless ($page =~ m!<label[^>]*>No\. Rekening</label></td>\s*<td[^>]*>(\d+)</td>!s) {
         return "can't get account number";
     }
-    $stmt->{account} = $self->_stripD($1);
-    $stmt->{account} =~ s/\D+//g;
+    $stmt->{account} = $1;
 
     my $adv1 = "probably the statement format changed, or input incomplete";
 
-    unless ($page =~ m!(?:^\s*|>)(?:Periode|Period)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*(\d\d)/(\d\d)/(\d\d\d\d) - (\d\d)/(\d\d)/(\d\d\d\d)!m) {
+    unless ($page =~ m!<label[^>]*>Periode Mutasi Rekening</label></td>\s*<td>\s*(?<d1>\d{1,2})-(?<m1>\w+)-(?<y1>\d{4})\s*s/d\s*(?<d2>\d{1,2})-(?<m2>\w+)-(?<y2>\d{4})\s*</td>!s) {
         return "can't get statement period, $adv1";
     }
-    $stmt->{start_date} = DateTime->new(day=>$1, month=>$2, year=>$3);
-    $stmt->{end_date}   = DateTime->new(day=>$4, month=>$5, year=>$6);
+    $stmt->{start_date} = DateTime->new(day=>$+{d1}, month=>$self->_parse_mon($+{m1}), year=>$+{y1});
+    $stmt->{end_date}   = DateTime->new(day=>$+{d2}, month=>$self->_parse_mon($+{m2}), year=>$+{y2});
 
-    unless ($page =~ /(?:^|>)(?:(?:Kode )?Mata Uang|Currency)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*(Rp|[A-Z]+)/m) {
+    unless ($page =~ m!<label[^>]*>Mata Uang</label></td>\s*<td[^>]*>(\w+)</td>!s) {
         return "can't get currency, $adv1";
     }
     $stmt->{currency} = ($1 eq 'Rp' ? 'IDR' : $1);
 
-    unless ($page =~ /(?:^|>)(?:Nama|Name)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*([^<\015\012]+)/m) {
+    unless ($page =~ m!<label[^>]*>Nama</label></td>\s*<td[^>]*>([^<]+?)\s*</td>!s) {
         return "can't get account holder, $adv1";
     }
     $stmt->{account_holder} = $1;
 
-    unless ($page =~ /(?:^|>)(?:Mutasi Kredit|Total Credits)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*([0-9,.]+)\.(\d\d)(?:\s*\t\s*(\d+))?/m) {
-        return "can't get total credit, $adv1";
-    }
-    $stmt->{_total_credit_in_stmt}  = $self->_stripD($1) + 0.01*$2;
-    $stmt->{_num_credit_tx_in_stmt} = $3 if $3;
+    # additional: Tipe: Tabungan
 
-    unless ($page =~ /(?:^|>)(?:Mutasi Debet|Total Debits)\s*(?:<[^>]+>\s*)*[:\t]\s*(?:<[^>]+>\s*)*([0-9,.]+)\.(\d\d)(?:\s*\t\s*(\d+))?/m) {
+    unless ($page =~ m!<label[^>]*>Mutasi Kredit</label></td>\s*<td[^>]*>([^<]+)</td>!s) {
         return "can't get total credit, $adv1";
     }
-    $stmt->{_total_debit_in_stmt}  = $self->_stripD($1) + 0.01*$2;
-    $stmt->{_num_debit_tx_in_stmt} = $3 if $3;
+    $stmt->{_total_credit_in_stmt}  = $self->_parse_num($1);
+    # no _num_credit_tx_in_stmt, pity cause it's required for proper checking
+
+    unless ($page =~ m!<label[^>]*>Mutasi Debet</label></td>\s*<td[^>]*>([^<]+)</td>!s) {
+        return "can't get total credit, $adv1";
+    }
+    $stmt->{_total_debit_in_stmt}  = -$self->_parse_num($1);
+    # no _num_debit_tx_in_stmt, pity cause it's required for proper checking
     "";
 }
 
@@ -294,36 +345,16 @@ sub _ps_get_transactions {
     my ($self, $page, $stmt) = @_;
 
     my @e;
-    # text version
-    while ($page =~ m!^
-(\d\d/\d\d|\s?PEND|\s?NEXT)
-  (?:\s*\t\s*|\n)
-((?:[^\t]|\n)*?)
-  (?:\s*\t\s*|\n)
-(\d{4})
-  (?:\s*\t\s*|\n)
-([0-9,]+)\.(\d\d)
-  (?:\s*\t?\s*|\n)
-(CR|DB)
-  (?:\s*\t\s*|\n)
-([0-9,]+)\.(\d\d)
-    !mxg) {
-        push @e, {date=>$1, desc=>$2, br=>$3, amt=>$4, amtf=>$5, crdb=>$6, bal=>$7, balf=>$8};
-    }
-    if (!@e) {
-        # HTML version
-        while ($page =~ m!^
-<tr>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  (\d\d/\d\d|\s?PEND|\s?NEXT)  (?:<[^>]+>\s*)*</td>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  ((?:[^\t]|\n)*?)             (?:<[^>]+>\s*)*</td>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  (\d{4})                      (?:<[^>]+>\s*)*</td>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  ([0-9,]+)\.(\d\d)            (?:<[^>]+>\s*)*</td>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  (CR|DB)                      (?:<[^>]+>\s*)*</td>\s*
-  <td[^>]+>(?:<[^>]+>\s*)*  ([0-9,]+)\.(\d\d)            (?:<[^>]+>\s*)*</td>\s*
-</tr>!smxg) {
-            push @e, {date=>$1, desc=>$2, br=>$3, amt=>$4, amtf=>$5, crdb=>$6, bal=>$7, balf=>$8};
-        }
-        for (@e) { $_->{desc} =~ s!<br ?/?>!\n!ig }
+    while ($page =~ m!
+<tr \s+ class="(?:odd|even)" \s+ id="informal_(?<seq>\d+)"[^>]*>\s*
+  <td[^>]+>\s* (?<date>\d\d/\d\d/\d\d\d\d) \s*</td>\s*
+  <td[^>]+>\s* (?<desc>[^<]+?) \s*</td>\s*
+  <td[^>]+>\s* (?<ref>[^<]+?) \s*</td>\s*
+  <td[^>]+>\s* (?<amt>[^<]+?) \s*</td>\s*
+  <td[^>]+>\s* (?<bal>[^<]+?) \s*</td>\s*
+</tr>!sxg) {
+        my %m = %+;
+        push @e, \%m;
     }
 
     my @tx;
@@ -336,33 +367,31 @@ sub _ps_get_transactions {
         my $tx = {};
         #$tx->{stmt_start_date} = $stmt->{start_date};
 
-        if ($e->{date} =~ /NEXT/) {
-            $tx->{date} = $stmt->{end_date};
-            $tx->{is_next} = 1;
-        } elsif ($e->{date} =~ /PEND/) {
-            $tx->{date} = $stmt->{end_date};
-            $tx->{is_pending} = 1;
-        } else {
-            my ($day, $mon) = split m!/!, $e->{date};
-            my $last_nonpend_date = DateTime->new(
-                                                  year => ($mon < $stmt->{start_date}->month ?
-                                                           $stmt->{end_date}->year :
-                                                           $stmt->{start_date}->year),
-                                                  month => $mon,
-                                                  day => $day);
-            $tx->{date} = $last_nonpend_date;
-            $tx->{is_pending} = 0;
-        }
+        ### bca
+        ###if ($e->{date} =~ /NEXT/) {
+        ###    $tx->{date} = $stmt->{end_date};
+        ###    $tx->{is_next} = 1;
+        ###} elsif ($e->{date} =~ /PEND/) {
+        ###    $tx->{date} = $stmt->{end_date};
+        ###    $tx->{is_pending} = 1;
+        ###} else {
+        my ($day, $mon, $year) = split m!/!, $e->{date};
+        my $last_nonpend_date = DateTime->new(
+            year => $year,
+            month => $mon,
+            day => $day);
+        $tx->{date} = $last_nonpend_date;
+        ###$tx->{is_pending} = 0;
+        ###}
 
         $tx->{description} = $e->{desc};
 
-        $tx->{branch} = $e->{br};
+        $tx->{amount}  = $self->_parse_num($e->{amt});
+        $tx->{balance} = $self->_parse_num($e->{bal});
 
-        $tx->{amount}  = ($e->{crdb} =~ /CR/ ? 1 : -1) * ($self->_stripD($e->{amt}) + 0.01*$e->{amtf});
-        $tx->{balance} = ($self->_stripD($e->{bal}) + 0.01*$e->{balf});
-
-        if ($tx->{is_next} && $self->skip_NEXT) {
-        }
+        ### bca
+        ###if ($tx->{is_next} && $self->skip_NEXT) {
+        ###}
 
         if (!$last_date || DateTime->compare($last_date, $tx->{date})) {
             $seq = 1;
@@ -372,32 +401,33 @@ sub _ps_get_transactions {
         }
         $tx->{seq} = $seq;
 
-        if ($self->_variant eq 'perorangan' &&
-            $tx->{date}->dow =~ /6|7/ &&
-            $tx->{description} !~ /^(BIAYA ADM|BUNGA|CR KOREKSI BUNGA|PAJAK BUNGA)$/) {
-            return "check failed in tx#$i: In KlikBCA Perorangan, all ".
-                "transactions must not be in Sat/Sun except for Interest and ".
-                "Admin Fee";
-            # note: in Tahapan perorangan, BIAYA ADM is set on
-            # Fridays, but for Tapres (?) on last day of the month
-        }
+        ### bca
+        ###if ($self->_variant eq 'individual' &&
+        ###    $tx->{date}->dow =~ /6|7/ &&
+        ###    $tx->{description} !~ /^(BIAYA ADM|BUNGA|CR KOREKSI BUNGA|PAJAK BUNGA)$/) {
+        ###    return "check failed in tx#$i: In KlikBCA Perorangan, all ".
+        ###        "transactions must not be in Sat/Sun except for Interest and ".
+        ###        "Admin Fee";
+        ###    # note: in Tahapan perorangan, BIAYA ADM is set on
+        ###    # Fridays, but for Tapres (?) on last day of the month
+        ###}
 
-        if ($self->_variant eq 'bisnis' &&
-            $tx->{date}->dow =~ /6|7/ &&
-            $tx->{description} !~ /^(BIAYA ADM|BUNGA|CR KOREKSI BUNGA|PAJAK BUNGA)$/) {
-            return "check failed in tx#$i: In KlikBCA Bisnis, all ".
-                "transactions must not be in Sat/Sun except for Interest and ".
-                "Admin Fee";
-            # note: in KlikBCA bisnis, BIAYA ADM is set on the last day of the
-            # month, regardless of whether it's Sat/Sun or not
-        }
+        ###if ($self->_variant eq 'bisnis' &&
+        ###    $tx->{date}->dow =~ /6|7/ &&
+        ###    $tx->{description} !~ /^(BIAYA ADM|BUNGA|CR KOREKSI BUNGA|PAJAK BUNGA)$/) {
+        ###    return "check failed in tx#$i: In KlikBCA Bisnis, all ".
+        ###        "transactions must not be in Sat/Sun except for Interest and ".
+        ###        "Admin Fee";
+        ###    # note: in KlikBCA bisnis, BIAYA ADM is set on the last day of the
+        ###    # month, regardless of whether it's Sat/Sun or not
+        ###}
 
-        if ($tx->{is_next} && $self->skip_NEXT) {
-            push @skipped_tx, $tx;
-            $seq--;
-        } else {
-            push @tx, $tx;
-        }
+        ###if ($tx->{is_next} && $self->skip_NEXT) {
+        ###    push @skipped_tx, $tx;
+        ###    $seq--;
+        ###} else {
+        push @tx, $tx;
+        ###}
     }
     $stmt->{transactions} = \@tx;
     $stmt->{skipped_transactions} = \@skipped_tx;
@@ -405,19 +435,19 @@ sub _ps_get_transactions {
 }
 
 1;
-# ABSTRACT: Check your BCA accounts from Perl
+# ABSTRACT: Check your BPR KS accounts from Perl
 
 =head1 SYNOPSIS
 
-    use Finance::Bank::ID::BCA;
+    use Finance::Bank::ID::BPRKS;
 
-    # FBI::BCA uses Log::Any. to show logs using, e.g., Log4perl:
+    # FBI::BPRKS uses Log::Any. to show logs using, e.g., Log4perl:
     use Log::Log4perl qw(:easy);
     use Log::Any::Adapter;
     Log::Log4perl->easy_init($DEBUG);
     Log::Any::Adapter->set('Log4perl');
 
-    my $ibank = Finance::Bank::ID::BCA->new(
+    my $ibank = Finance::Bank::ID::BPRKS->new(
         username => 'ABCDEFGH1234', # opt if only using parse_statement()
         password => '123456',       # idem
         verify_https => 1,          # default is 0
@@ -427,14 +457,14 @@ sub _ps_get_transactions {
     eval {
         $ibank->login(); # dies on error
 
-        my @accts = $ibank->list_accounts();
+        my @cards = $ibank->list_cards();
 
-        my $bal = $ibank->check_balance($acct); # $acct is optional
+        my $bal = $ibank->check_balance($card); # $card is optional
 
         my $stmt = $ibank->get_statement(
-            account    => ..., # opt, default account will be used if undef
-            days       => 31,  # opt
-            start_date => DateTime->new(year=>2009, month=>10, day=>6),
+            card       => ..., # opt, default card will be used if undef
+            days       => 30,  # opt
+            start_date => DateTime->new(year=>2012, month=>6, day=>1),
                                # opt, takes precedence over 'days'
             end_date   => DateTime->today, # opt, takes precedence over 'days'
         );
@@ -458,19 +488,20 @@ using this module.
 
 =head1 DESCRIPTION
 
+B<RELEASE NOTE: This is an early release. Only parse_statement() for a single
+statement page is implemented.>
+
 This module provide a rudimentary interface to the web-based online banking
-interface of the Indonesian B<Bank Central Asia> (BCA) at
-https://ibank.klikbca.com. You will need either L<Crypt::SSLeay> or
+interface of the Indonesian B<BPR Karyajatnika Sadaya> (BPR KS, BPRKS) at
+https://ib.bprks.co.id. You will need either L<Crypt::SSLeay> or
 L<IO::Socket::SSL> installed for HTTPS support to work (and strictly
 Crypt::SSLeay to enable certificate verification). L<WWW::Mechanize> is required
 but you can supply your own mech-like object.
 
-This module can only login to the retail/personal version of the site (KlikBCA
-perorangan) and not the corporate/business version (KlikBCA bisnis) as the later
-requires VPN and token input on login. But this module can parse statement page
-from both versions.
+This module can only login to the individual edition of the site. I haven't
+checked out the other versions.
 
-Warning: This module is neither offical nor is it tested to be 100% save!
+Warning: This module is neither offical nor is it tested to be 100% safe!
 Because of the nature of web-robots, everything may break from one day to the
 other when the underlying web interface changes.
 
@@ -491,9 +522,8 @@ GUARANTEE>, explicit or implied.
 
 Most methods die() when encountering errors, so you can use eval() to trap them.
 
-This module uses L<Log::Any>, so you can see more debugging statements
-on your screen, log files, etc. See the Log::Any documentation on how
-to do that.
+This module uses L<Log::Any>, so you can see more debugging statements on your
+screen, log files, etc. See the Log::Any documentation on how to do that.
 
 Full response headers and bodies are dumped to a separate logger. See
 documentation on C<new()> below and the sample script in examples/ subdirectory
@@ -614,8 +644,8 @@ already selected account.
 
 =item * days
 
-Optional. Number of days between 1 and 31. If days is 1, then start date and end
-date will be the same. Default is 31.
+Optional. Number of days between 1 and 30. If days is 1, then start date and end
+date will be the same. Default is 30.
 
 =item * start_date
 
@@ -650,7 +680,7 @@ structured data:
           amount      => REAL, # a real number, positive means credit (deposit),
                                # negative means debit (withdrawal)
           description => STRING,
-          is_pending  => BOOL,
+          #is_pending  => BOOL,
           branch      => STRING, # a 4-digit branch/ATM code
           balance     => REAL,
         },
@@ -659,6 +689,9 @@ structured data:
     ]
  }
 
+$html is the HTML text. Since there can be multiple pages, $html can also be an
+arrayref of HTML texts (this is not yet implemented).
+
 Returns:
 
  [$status, $err_details, $stmt]
@@ -666,7 +699,7 @@ Returns:
 C<$status> is 200 if successful or some other 3-digit code if parsing failed.
 C<$stmt> is the result (structure as above, or undef if parsing failed).
 
-Options:
+Options (%opts):
 
 =over 4
 
