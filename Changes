@@ -1,5 +1,12 @@
 Revision history for Finance-Bank-ID-BPRKS
 
+0.02    2014-05-17 (SHARYANTO)
+
+        - No functional changes.
+
+        - Replace File::Slurp with File::Slurp::Tiny.
+
+
 0.01    2012-06-12 (SHARYANTO)
 
         - First, early release. Only parsing of statement page has been

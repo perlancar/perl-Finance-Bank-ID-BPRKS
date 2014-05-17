@@ -631,6 +631,10 @@ current net banking login.
 Return balance for specified account, or the default account if C<$account> is
 not specified.
 
+=head2 list_cards()
+
+List ATM cards. Not yet implemented.
+
 =head2 get_statement(%args) => $stmt
 
 Get account statement. %args keys:
