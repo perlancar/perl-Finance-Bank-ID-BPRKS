@@ -22,7 +22,7 @@ print Dump $ibank->parse_statement($stmt, return_datetime_obj=>0);
 
 1;
 # ABSTRACT: Parse BPR KS internet banking statement
-# PODNAME: parse-bprks-statement
+# PODNAME:
 
 =head1 SYNOPSIS
 
