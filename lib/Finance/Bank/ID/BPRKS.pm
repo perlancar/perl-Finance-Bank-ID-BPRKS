@@ -1,13 +1,14 @@
 package Finance::Bank::ID::BPRKS;
 
+# DATE
+# VERSION
+
 use 5.010001;
 use Moo;
 use DateTime;
-use Log::Any '$log';
+use Log::Any::IfLOG '$log';
 
 use Parse::Number::ID qw(parse_number_id);
-
-# VERSION
 
 extends 'Finance::Bank::ID::Base';
 
