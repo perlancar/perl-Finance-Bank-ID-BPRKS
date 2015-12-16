@@ -1,5 +1,12 @@
 Revision history for Finance-Bank-ID-BPRKS
 
+0.05    2015-12-16 (PERLANCAR)
+
+	- No functional changes.
+
+	- Bump prereq version Log::Any::IfLOG to 0.07.
+
+
 0.04    2015-08-17 (PERLANCAR)
 
 	- Switch from Log::Any to Log::Any::IfLOG.
