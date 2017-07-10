@@ -6,7 +6,7 @@ package Finance::Bank::ID::BPRKS;
 use 5.010001;
 use Moo;
 use DateTime;
-use Log::Any::IfLOG '$log';
+use Log::ger;
 
 use Parse::Number::ID qw(parse_number_id);
 
